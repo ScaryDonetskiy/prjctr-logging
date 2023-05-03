@@ -1,0 +1,90 @@
+version: "3.9"
+
+services:
+  mysql:
+    image: mysql:latest
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+    volumes:
+      - ./.infrastructure/mysql.cnf:/etc/mysql/my.cnf
+      - mysql-data:/var/lib/mysql
+      - mysql-log:/var/log/mysql
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.12.0
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+      discovery.type: single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:7.12.0
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    depends_on:
+      - elasticsearch
+
+  filebeat-elk:
+    image: docker.elastic.co/beats/filebeat:7.12.0
+    user: root
+    volumes:
+      - ./.infrastructure/filebeat.elk.yml:/usr/share/filebeat/filebeat.yml
+      - mysql-log:/var/log/mysql
+    depends_on:
+      - mysql
+      - elasticsearch
+
+  filebeat-graylog:
+    image: docker.elastic.co/beats/filebeat:7.12.0
+    user: root
+    environment:
+      GRAYLOG_HOSTS: 'graylog:5044'
+    volumes:
+      - ./.infrastructure/filebeat.graylog.yml:/usr/share/filebeat/filebeat.yml
+      - mysql-log:/var/log/mysql
+    depends_on:
+      - graylog
+      - elasticsearch
+
+  graylog:
+    image: graylog/graylog:5.0
+    entrypoint: /usr/bin/tini -- wait-for-it elasticsearch:9200 -- /docker-entrypoint.sh
+    ports:
+      - "9000:9000"
+      - "1514:1514"
+      - "1514:1514/udp"
+      - "12201:12201"
+      - "12201:12201/udp"
+      - "5045:5045"
+    environment:
+      GRAYLOG_PASSWORD_SECRET: 'passwordpassword'
+      GRAYLOG_ROOT_PASSWORD_SHA2: '5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8'
+      GRAYLOG_HTTP_EXTERNAL_URI: 'http://127.0.0.1:9000/'
+      GRAYLOG_MONGODB_URI: 'mongodb://mongo/graylog'
+      GRAYLOG_ELASTICSEARCH_HOSTS: 'http://elasticsearch:9200'
+    depends_on:
+      mongo:
+        condition: service_started
+      elasticsearch:
+        condition: service_started
+
+  mongo:
+    image: mongo:latest
+
+volumes:
+  mysql-data:
+  mysql-log:
+  elasticsearch-data:
